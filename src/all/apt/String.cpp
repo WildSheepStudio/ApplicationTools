@@ -26,6 +26,7 @@ uint StringBase::set(const char* _src, uint _count)
 	len -= 1;
 	strncpy(m_buf, _src, len);
 	m_buf[len] = '\0';
+    m_size = len;
 	return len;
 }
 
@@ -35,6 +36,7 @@ uint StringBase::setf(const char* _fmt, ...)
 	va_start(args, _fmt);
 	uint ret = setfv(_fmt, args);
 	va_end(args);
+    m_size = ret;
 	return ret;
 }
 
@@ -61,7 +63,6 @@ uint StringBase::setfv(const char* _fmt, va_list _args)
 		APT_VERIFY(vsnprintf(m_buf, m_capacity, _fmt, args) >= 0);
 	}
 #endif
-	
 	return (uint)len - 1;
 }
 
@@ -78,8 +79,10 @@ uint StringBase::append(const char* _src, uint _count)
 	strncpy(m_buf + len, _src, srclen);
 	len += srclen;
 	m_buf[len] = '\0';
+    m_size = len;
 	return len;
 }
+
 
 uint StringBase::appendf(const char* _fmt, ...)
 {
@@ -87,6 +90,7 @@ uint StringBase::appendf(const char* _fmt, ...)
 	va_start(args, _fmt);
 	uint ret = appendfv(_fmt, args);
 	va_end(args);
+    m_size = ret;
 	return ret;
 }
 
@@ -95,7 +99,7 @@ uint StringBase::appendfv(const char* _fmt, va_list _args)
 	va_list args;
 	va_copy(args, _args);
 
-	uint len = getLength();
+	uint len = m_size;
 	int srclen = vsnprintf(0, 0, _fmt, args);
 	APT_ASSERT(srclen > 0);
 	srclen += 1;
@@ -103,8 +107,7 @@ uint StringBase::appendfv(const char* _fmt, va_list _args)
 		realloc(len + srclen);
 	}
 	APT_VERIFY(vsnprintf(m_buf + len, (uint)srclen, _fmt, args) >= 0);
-	
-	return (uint)srclen + len - 1;;
+	return (uint)srclen + len - 1;
 }
 
 const char* StringBase::findFirst(const char* _list) const
@@ -160,7 +163,8 @@ uint StringBase::getLength() const
 	if (!m_buf) {
 		return 0;
 	}
-	return strlen(m_buf);
+	//return strlen(m_buf);
+    return m_size;
 }
 
 bool StringBase::operator==(const char* _rhs) const
@@ -183,6 +187,7 @@ void apt::swap(StringBase& _a_, StringBase& _b_)
 		if (bothHeap) {
 		 // neither are local, simple swap
 			swap(_a_.m_buf, _b_.m_buf);
+            swap(_a_.m_size, _b_.m_size);
 		} else {
 		 // swap the buffer contents
 			for (uint i = 0; i < _a_.m_capacity; ++i) {
@@ -196,7 +201,7 @@ void apt::swap(StringBase& _a_, StringBase& _b_)
 		 // neither are local, simple swap
 			swap(_a_.m_buf, _b_.m_buf);
 			swap(_a_.m_capacity, _b_.m_capacity);
-
+            swap(_a_.m_size, _b_.m_size);
 		} else if (bothLocal) {
 		 // both are local, need to alloc the smallest one
 			StringBase& smaller = _a_.m_capacity < _b_.m_capacity ? _a_ : _b_;
@@ -208,7 +213,7 @@ void apt::swap(StringBase& _a_, StringBase& _b_)
 
 			smaller.m_buf = buf;
 			swap(_a_.m_capacity, _b_.m_capacity);
-
+            swap(_a_.m_size, _b_.m_size);
 		} else {
 		 // one is heap, alloc the other and swap (can't return to being local)
 			StringBase& local = _a_.isLocal() ? _a_ : _b_;
@@ -216,9 +221,9 @@ void apt::swap(StringBase& _a_, StringBase& _b_)
 			char* buf = (char*)malloc(local.m_capacity * sizeof(char));
 			memcpy(buf, local.m_buf, local.m_capacity * sizeof(char));
 			local.m_buf = buf;
-
 			swap(_a_.m_buf, _b_.m_buf);
 			swap(_a_.m_capacity, _b_.m_capacity);
+            swap(_a_.m_size, _b_.m_size);
 		}
 	}
 }
@@ -228,12 +233,14 @@ void apt::swap(StringBase& _a_, StringBase& _b_)
 StringBase::StringBase()
 	: m_buf(nullptr)
 	, m_capacity(0)
+    , m_size(0)
 {
 }
 
 StringBase::StringBase(uint _localBufferSize)
 	: m_buf(getLocalBuf())
 	, m_capacity(_localBufferSize)
+    , m_size(0)
 {
 	*m_buf = '\0';
 }
@@ -241,6 +248,7 @@ StringBase::StringBase(uint _localBufferSize)
 StringBase::StringBase(StringBase&& _rhs_)
 	: m_buf(getLocalBuf())
 	, m_capacity(_rhs_.m_capacity)
+    , m_size(_rhs_.m_size)
 {
 	if (_rhs_.isLocal()) {
 		strncpy(m_buf, _rhs_.m_buf, _rhs_.m_capacity);
@@ -248,6 +256,7 @@ StringBase::StringBase(StringBase&& _rhs_)
 		m_buf = _rhs_.m_buf;
 		_rhs_.m_buf = nullptr;
 		_rhs_.m_capacity = 0;
+        _rhs_.m_size = 0;
 	}
 }
 StringBase& StringBase::operator=(StringBase&& _rhs_)
@@ -259,6 +268,7 @@ StringBase& StringBase::operator=(StringBase&& _rhs_)
 			m_buf = _rhs_.m_buf;
 			_rhs_.m_buf = nullptr;
 			_rhs_.m_capacity = 0;
+            _rhs_.m_size = 0;
 		}
 	}
 	return *this;
@@ -280,6 +290,7 @@ void StringBase::alloc(uint _capacity)
 	}
 	m_buf = (char*)malloc(_capacity * sizeof(char));
 	m_capacity = _capacity;
+    m_size = 0;
 }
 
 void StringBase::realloc(uint _capacity)

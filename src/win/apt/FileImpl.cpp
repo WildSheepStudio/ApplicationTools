@@ -10,6 +10,7 @@
 
 #include <cstdlib> // malloc, free
 #include <utility> // swap
+#include "../../../../../../src/Helpers/PerforceHelper.h"
 
 using namespace apt;
 
@@ -93,7 +94,6 @@ File_Read_end:
 			free(data);
 		}
 		APT_LOG_ERR("Error reading '%s':\n\t%s", _path, err);
-		APT_ASSERT(false);
 	}
 	if (h != INVALID_HANDLE_VALUE) {
 		APT_PLATFORM_VERIFY(CloseHandle(h));
@@ -107,6 +107,8 @@ bool File::Write(const File& _file, const char* _path)
 		_path = _file.getPath();
 	}
 	APT_ASSERT(_path);
+
+    TerraFormer::PerforceHelper::BeforeWrite(_path);
 
 	bool ret = false;
 	const char* errstr = "";
@@ -152,5 +154,8 @@ File_Write_end:
 	if (h != INVALID_HANDLE_VALUE) {
 		APT_PLATFORM_VERIFY(CloseHandle(h));
 	}
+
+    TerraFormer::PerforceHelper::AfterWrite(_path);
+
 	return ret;
 }

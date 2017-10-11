@@ -154,9 +154,52 @@ int FileSystem::PlatformSelectMulti(PathStr retList_[], int _maxResults, const c
 	return 0;
 }
 
+int FileSystem::ListFolders(PathStr retList_[], int _maxResults, const char* _path, const char* _filter, bool _recursive)
+{
+    eastl::vector<PathStr> dirs;
+    dirs.push_back(_path);
+    int ret = 0;
+    while (ret < _maxResults && !dirs.empty()) {
+        PathStr root = (PathStr&&)dirs.back();
+        dirs.pop_back();
+        root.replace('/', '\\');
+        PathStr search = root;
+        search.appendf("\\%s", _filter); // \todo check if / or \\ already at the end, same for the dir code below
+
+        WIN32_FIND_DATA ffd;
+        HANDLE h = FindFirstFile((const char*)search, &ffd);
+        if (h == INVALID_HANDLE_VALUE) {
+            //APT_LOG_ERR("ListFiles (ListFolders): %s", GetPlatformErrorString(GetLastError()));
+            continue;
+        }
+
+        do {
+            if (strcmp(ffd.cFileName, ".") != 0 && strcmp(ffd.cFileName, "..") != 0) {
+                if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                    if (_recursive) {
+                        dirs.push_back(root);
+                        dirs.back().appendf("\\%s", ffd.cFileName, _filter);
+                    }
+                    retList_[ret++].setf("%s\\%s", (const char*)root, ffd.cFileName);
+                }
+            }
+
+        } while (ret < _maxResults && FindNextFile(h, &ffd) != 0);
+
+        DWORD err = GetLastError();
+        if (err != ERROR_NO_MORE_FILES) {
+            //APT_LOG_ERR("ListFiles (FindNextFile): %s", GetPlatformErrorString(err));
+        }
+
+        FindClose(h);
+    }
+
+    return ret;
+}
+
 int FileSystem::ListFiles(PathStr retList_[], int _maxResults, const char* _path, const char* _filter, bool _recursive)
 {
-	eastl::vector<PathStr> dirs;
+    eastl::vector<PathStr> dirs;
 	dirs.push_back(_path);
 	int ret = 0;
 	while (ret < _maxResults && !dirs.empty()) {
@@ -169,7 +212,7 @@ int FileSystem::ListFiles(PathStr retList_[], int _maxResults, const char* _path
 		WIN32_FIND_DATA ffd;
 		HANDLE h = FindFirstFile((const char*)search, &ffd);
 		if (h == INVALID_HANDLE_VALUE) {
-			APT_LOG_ERR("ListFiles (FindFirstFile): %s", GetPlatformErrorString(GetLastError()));
+			//APT_LOG_ERR("ListFiles (FindFirstFile): %s", GetPlatformErrorString(GetLastError()));
 			continue;
 		} 
 
@@ -189,7 +232,7 @@ int FileSystem::ListFiles(PathStr retList_[], int _maxResults, const char* _path
 
 		DWORD err = GetLastError();
 		if (err != ERROR_NO_MORE_FILES) {
-			APT_LOG_ERR("ListFiles (FindNextFile): %s", GetPlatformErrorString(err));
+			//APT_LOG_ERR("ListFiles (FindNextFile): %s", GetPlatformErrorString(err));
 		}
 
 		FindClose(h);

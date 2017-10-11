@@ -54,7 +54,7 @@ public:
 	void toLowerCase();
 
 	// String length, excluding the terminating null.
-	// \note String length is not stored internally, hence getLength() is not a constant time operation.
+	// \note String length is now stored internally (in m_size), so it is a constant time operation.
 	uint getLength() const;
 
 	void clear()                                { *m_buf = '\0'; }
@@ -89,7 +89,7 @@ protected:
 private:
 	char* m_buf;       // Ptr to local buffer, or heap allocated.
 	uint  m_capacity;  // Local buffer/allocated size.
-
+    uint  m_size = 0;  // Added by Berenger : String real size, to speed up getLength
 	// Resize m_buf to _capacity, discard contents.
 	void alloc(uint _capacity);
 

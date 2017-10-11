@@ -89,10 +89,13 @@ public:
 	
 	// Select a file/files via the platform UI. _filters is a null-separated list of filter strings.
 	static bool        PlatformSelect(PathStr& ret_, const char* _filters = "");
-	static int         PlatformSelectMulti(PathStr retList_[], int _maxResults, const char* _filters = "");
+	static int         PlatformSelectMulti(PathStr retList_[], int _maxResults, const char* _filters = "");    
 
 	// List up to _maxResults files in _path with option recursion.
 	static int         ListFiles(PathStr retList_[], int _maxResults, const char* _path, const char* _filter = "*.*", bool _recursive = false);
+
+    // List up to _maxResults files in _path with option recursion.
+    static int         ListFolders(PathStr retList_[], int _maxResults, const char * _path, const char * _filter = "*", bool _recursive = false);
 
 	// Create the directory specified by _path, plus all parent directories if they do not exist. Return false if an error occurred.
 	// \note If _path contains only directory names, it must end in a path delimiter (e.g. "dir0/dir1/").
