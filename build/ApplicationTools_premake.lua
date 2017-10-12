@@ -24,7 +24,7 @@ workspace "ApplicationTools"
 	location(_ACTION)
 	configurations { "Debug", "Release" }
 	platforms { "Win64" }
-	flags { "C++11", "StaticRuntime" }
+	flags { "C++11" }
 	filter { "platforms:Win64" }
 		system "windows"
 		architecture "x86_64"
@@ -38,7 +38,13 @@ workspace "ApplicationTools"
 			WIN_SRC_DIR, 
 			WIN_EXTERN_DIR,
 			})
-		
+	
+	configuration{"vs*", "configurations:Debug"}
+		buildoptions {"/MDd"}
+
+	configuration{"vs*", "configurations:Release"}
+		buildoptions {"/MTd"}
+
 	project "ApplicationTools"
 		kind "StaticLib"
 		language "C++"
