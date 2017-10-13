@@ -161,3 +161,10 @@ mat4 apt::LookAt(const vec3& _from, const vec3& _to, const vec3& _up)
 	ret[3] = vec4(_from, 1.0f);
 	return ret;
 }
+
+mat4 apt::LookAtForCamera(const vec3& _from, const vec3& _to, const vec3& _up)
+{
+	mat4 ret = AlignZ(-normalize(_to - _from), _up);
+	ret[3] = vec4(_from, 1.0f);
+	return ret;
+}

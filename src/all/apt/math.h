@@ -80,7 +80,9 @@ namespace apt {
 	mat4 AlignZ(const vec3& _axis, const vec3& _up = vec3(0.0f, 1.0f, 0.0f));
 	
 	// Matrix with position = _from and +Z = (_to - _from).
-	mat4 LookAt(const vec3& _from, const vec3& _to, const vec3& _up = vec3(0.0f, 1.0f, 0.0f));
+	mat4 LookAt			(const vec3& _from, const vec3& _to, const vec3& _up = vec3(0.0f, 1.0f, 0.0f));
+	// Matrix with position = _from and -Z = (_to - _from).
+	mat4 LookAtForCamera(const vec3& _from, const vec3& _to, const vec3& _up = vec3(0.0f, 1.0f, 0.0f));
 
 	// \todo Rename, add a templated interface for integral types, plus interface for e.g. random rotations
 	class LCG
