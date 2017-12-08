@@ -149,7 +149,6 @@ bool File::Write(const File& _file, const char* _path)
 File_Write_end:
 	if (!ret) {
 		APT_LOG_ERR("Error writing '%s':\n\t%s", _path, errstr);
-		APT_ASSERT(false);
 	}
 	if (h != INVALID_HANDLE_VALUE) {
 		APT_PLATFORM_VERIFY(CloseHandle(h));
