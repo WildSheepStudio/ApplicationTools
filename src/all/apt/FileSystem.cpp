@@ -26,7 +26,6 @@ bool FileSystem::Read(File& file_, const char* _path, RootType _rootHint)
 	PathStr fullPath;
 	if (!FindExisting(fullPath, _path ? _path : file_.getPath(), _rootHint)) {
 		APT_LOG_ERR("Error loading '%s':\n\tFile not found", _path);
-		APT_ASSERT(false);
 		return false;
 	}
 	return File::Read(file_, (const char*)fullPath);
