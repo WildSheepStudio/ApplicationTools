@@ -11,7 +11,12 @@ filter { "configurations:debug" }
 	targetsuffix "_debug"
 	symbols "On"
 	optimize "Off"
-	
+
+filter { "configurations:Debug_Optimized" }
+	targetsuffix "_debugOptimized"
+	symbols "Off"
+	optimize "On"
+
 filter { "configurations:release" }
 	symbols "Off"
 	optimize "Full"
@@ -22,7 +27,7 @@ filter { "action:vs*" }
 
 workspace "ApplicationTools"
 	location(_ACTION)
-	configurations { "Debug", "Release" }
+	configurations { "Debug", "Debug_Optimized", "Release" }
 	platforms { "Win64" }
 	flags { "C++11" }
 	filter { "platforms:Win64" }
@@ -41,6 +46,9 @@ workspace "ApplicationTools"
 	
 	configuration{"vs*", "configurations:Debug"}
 		buildoptions {"/MDd"}
+
+	configuration{"vs*", "configurations:Debug_Optimized"}
+		buildoptions {"/MTd"}
 
 	configuration{"vs*", "configurations:Release"}
 		buildoptions {"/MTd"}
