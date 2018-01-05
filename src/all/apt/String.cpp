@@ -264,6 +264,7 @@ StringBase& StringBase::operator=(StringBase&& _rhs_)
 	if (&_rhs_ != this) {
 		if (_rhs_.isLocal()) {
 			strncpy(m_buf, _rhs_.getLocalBuf(), _rhs_.m_capacity);
+			m_size = _rhs_.m_size;
 		} else {
 			m_buf = _rhs_.m_buf;
 			_rhs_.m_buf = nullptr;

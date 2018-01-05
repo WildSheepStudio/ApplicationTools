@@ -85,11 +85,11 @@ protected:
 
 	char* getLocalBuf()             { return (char*)this + sizeof(StringBase); }
 	const char* getLocalBuf() const { return (char*)this + sizeof(StringBase); }
-
+	uint  m_size;  // Added by Berenger : String real size, to speed up getLength
 private:
 	char* m_buf;       // Ptr to local buffer, or heap allocated.
 	uint  m_capacity;  // Local buffer/allocated size.
-    uint  m_size = 0;  // Added by Berenger : String real size, to speed up getLength
+    
 	// Resize m_buf to _capacity, discard contents.
 	void alloc(uint _capacity);
 
@@ -115,7 +115,7 @@ public:
 		if (_fmt) {
 			va_list args;
 			va_start(args, _fmt);
-			setfv(_fmt, args);
+			m_size = setfv(_fmt, args);
 			va_end(args);
 		}
 	}
@@ -135,7 +135,7 @@ public:
 		if (_fmt) {
 			va_list args;
 			va_start(args, _fmt);
-			setfv(_fmt, args);
+			m_size = setfv(_fmt, args);
 			va_end(args);
 		}
 	}
