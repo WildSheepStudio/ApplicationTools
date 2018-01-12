@@ -4,6 +4,7 @@
 
 #include <cstdarg> // va_list, va_start, va_end
 #include <cstdio>  // vfprintf
+#include <string>
 
 using namespace apt;
 
@@ -14,7 +15,15 @@ static void DispatchLogCallback(const char* _fmt, va_list _args, LogType _type)
 {
 	if (g_logCallback) {
 		String<kLogMsgMax> buf;
-		buf.setfv(_fmt, _args);
+		
+		if (_type == LogType_Error)
+			buf.append("ERROR   - ");
+		else if (_type == LogType_Debug)
+			buf.append("DEBUG   - ");
+		else
+			buf.append("MESSAGE - ");
+
+		buf.appendfv(_fmt, _args);
 		g_logCallback(buf, _type);
 	}
 }
