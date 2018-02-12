@@ -180,7 +180,9 @@ int FileSystem::ListFolders(PathStr retList_[], int _maxResults, const char* _pa
                         dirs.push_back(root);
                         dirs.back().appendf("\\%s", ffd.cFileName, _filter);
                     }
-                    retList_[ret++].setf("%s\\%s", (const char*)root, ffd.cFileName);
+                    retList_[ret].setf("%s\\%s", (const char*)root, ffd.cFileName);
+					retList_[ret].replace('\\', '/'); // sanitize path for display
+					ret++;
                 }
             }
 
@@ -190,7 +192,7 @@ int FileSystem::ListFolders(PathStr retList_[], int _maxResults, const char* _pa
         if (err != ERROR_NO_MORE_FILES) {
             //APT_LOG_ERR("ListFiles (FindNextFile): %s", GetPlatformErrorString(err));
         }
-
+		
         FindClose(h);
     }
 
@@ -224,7 +226,9 @@ int FileSystem::ListFiles(PathStr retList_[], int _maxResults, const char* _path
 						dirs.back().appendf("\\%s", ffd.cFileName, _filter);
 					}
 				} else {
-					retList_[ret++].setf("%s\\%s", (const char*)root, ffd.cFileName);
+					retList_[ret].setf("%s\\%s", (const char*)root, ffd.cFileName);
+					retList_[ret].replace('\\', '/'); // sanitize path for display
+					ret++;
 				}
 			}
 	
