@@ -64,85 +64,93 @@ namespace apt {
 //   have a lifetime at least as long as the Json object. String ptrs passed to
 //   the _val argument are copied internally.
 ////////////////////////////////////////////////////////////////////////////////
-class Json
-{
-	friend class JsonSerializer;
-public:
-	enum ValueType
+	class Json
 	{
-		ValueType_Null,
-		ValueType_Object,
-		ValueType_Array,
-		ValueType_Bool,
-		ValueType_Number,
-		ValueType_String,
+		friend class JsonSerializer;
+	public:
+		enum ValueType
+		{
+			ValueType_Null,
+			ValueType_Object,
+			ValueType_Array,
+			ValueType_Bool,
+			ValueType_Number,
+			ValueType_String,
 
-		ValueType_Count
+			ValueType_Count
+		};
+
+		static bool Read(Json& json_, const File& _file);
+		static bool Read(Json& json_, const char* _path, FileSystem::RootType _rootHint = FileSystem::RootType_Default);
+		static bool Write(const Json& _json, File& file_);
+		static bool Write(const Json& _json, const char* _path, FileSystem::RootType _rootHint = FileSystem::RootType_Default);
+
+		// Reads from _path if specified.
+		Json(const char* _path = nullptr, FileSystem::RootType _rootHint = FileSystem::RootType_Default);
+		~Json();
+
+		// Find a named value in the current object. Return true if the value is found, in which case getValue() may be called.
+		bool find(const char* _name);
+
+		// Get the next value in the current object/array. Return true if not the end of the object/array, in which case getValue() may be called.
+		bool next();
+
+		// Get the type of the current value.
+		ValueType getType() const;
+
+		// Get the current value. tType must match the type of the current value (i.e. getValue<int>() must be called only if the value type is ValueType_Number).
+		// _i permits array access (when in an array). 0 <= _i < getArrayLength().
+		// Note that the ptr returned by getValue<const char*> is only valid during the lifetime of the Json object.
+		template <typename tType>
+		tType getValue(int _i = -1) const;
+
+		// Get a named value. Equivalent to find(_name) followed by getValue(_i).
+		template <typename tType>
+		tType getValue(const char* _name, int _i = -1) { APT_VERIFY(find(_name)); return getValue<tType>(_i); }
+
+		// Create and set a named value. If the object already exists this modifies the type and value of the existing object.
+		template <typename tType>
+		void setValue(const char* _name, tType _value);
+
+		// Set the _ith element of an array. 0 <= _i < getArrayLength().
+		template <typename tType>
+		void setValue(int _i, tType _value);
+
+		// Enter the current object (call immediately after find() or next()). Return false if the current value is not an object.
+		bool enterObject();
+		// Leave the current object.
+		void leaveObject();
+
+		// Enter the array (call immediately after find() or next()). Return false if the current value is not an array.
+		bool enterArray();
+		// Leave the current array.
+		void leaveArray();
+
+		// Return number of elements in the current array (or -1 if not in an array).
+		int getArrayLength() const;
+
+		// Create and enter an object. If the object already exists this has the same effect as a call to find() followed by
+		// a call to enterObject(). If _name is nullptr the object is expected to be an array member.
+		void beginObject(const char* _name = nullptr);
+		// Leave the current object.
+		void endObject() { leaveObject(); }
+
+		// Create and enter an array. If the array already exists this has the effect as a call to find() followed by a 
+		// call to enterArray(). If _name is nullptr the array is expected to be an array member.
+		void beginArray(const char* _name = nullptr);
+		// Leave the current array.
+		void endArray() { leaveArray(); }
+
+		// Push _value into the current array.
+		template <typename tType>
+		void pushValue(tType _value);
+
+
+	private:
+		struct Impl;
+		Impl* m_impl;
+
 	};
-
-	static bool Read(Json& json_, const File& _file);
-	static bool Read(Json& json_, const char* _path, FileSystem::RootType _rootHint = FileSystem::RootType_Default);
-	static bool Write(const Json& _json, File& file_);
-	static bool Write(const Json& _json, const char* _path, FileSystem::RootType _rootHint = FileSystem::RootType_Default);
-		
-	// Reads from _path if specified.
-	Json(const char* _path = nullptr, FileSystem::RootType _rootHint = FileSystem::RootType_Default);
-	~Json();
-
-	// Find a named value in the current object. Return true if the value is found, in which case getValue() may be called.
-	bool find(const char* _name);
-	
-	// Get the next value in the current object/array. Return true if not the end of the object/array, in which case getValue() may be called.
-	bool next();
-
-	// Get the type of the current value.
-	ValueType getType() const;
-
-	// Get the current value. tType is expected to match the type of the current value exactly (i.e. getValue<int>() must be called only 
-	// if the value type is ValueType_Number).
-	// \note Ptr returned by getValue<const char*> is only valid during the lifetime of the Json object.
-	template <typename tType>
-	tType getValue() const;
-
-	// Enter the current object (call immediately after find() or next()). Return false if the current value is not an object.
-	bool enterObject();
-	// Leave the current object.
-	void leaveObject();
-
-	// Enter the array (call immediately after find() or next()). Return false if the current value is not an array.
-	bool enterArray();
-	// Leave the current array.
-	void leaveArray();
-
-	// Return length of the current array (or -1 if not in an array).
-	int getArrayLength() const;
-
-	// Create and enter an object. If the object already exists this has the same effect as a call to find() followed by
-	// a call to enterObject(). If _name is nullptr the object is expected to be an array member.
-	void beginObject(const char* _name = nullptr);
-	// Leave the current object.
-	void endObject() { leaveObject(); }
-	
-	// Create and set a named value. If the object already exists this modifies the type and value of the existing object.
-	template <typename tType>
-	void setValue(const char* _name, tType _value);
-
-	// Create and enter an array. If the array already exists this has the effect as a call to find() followed by a 
-	// call to enterArray(). If _name is nullptr the array is expected to be an array member.
-	void beginArray(const char* _name = nullptr);
-	// Leave the current array.
-	void endArray() { leaveArray(); }
-
-	// Create and set an array member.
-	template <typename tType>
-	void pushValue(tType _value);
-	
-
-private:
-	struct Impl;
-	Impl* m_impl;
-
-}; // class Json
 
 ////////////////////////////////////////////////////////////////////////////////
 // JsonSerializer

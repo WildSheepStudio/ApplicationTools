@@ -6,6 +6,8 @@
 #include <apt/String.h>
 #include <apt/Time.h>
 
+#include <EASTL/vector.h>
+
 #include <cstring>
 
 #define RAPIDJSON_ASSERT(x) APT_ASSERT(x)
@@ -19,61 +21,66 @@ using namespace apt;
 static Json::ValueType GetValueType(rapidjson::Type _type)
 {
 	switch (_type) {
-		case rapidjson::kNullType:   return Json::ValueType_Null;
-		case rapidjson::kObjectType: return Json::ValueType_Object;
-		case rapidjson::kArrayType:  return Json::ValueType_Array;
-		case rapidjson::kFalseType:
-		case rapidjson::kTrueType:   return Json::ValueType_Bool;
-		case rapidjson::kNumberType: return Json::ValueType_Number;
-		case rapidjson::kStringType: return Json::ValueType_String;
-		default: APT_ASSERT(false); break;
+	case rapidjson::kNullType:   return Json::ValueType_Null;
+	case rapidjson::kObjectType: return Json::ValueType_Object;
+	case rapidjson::kArrayType:  return Json::ValueType_Array;
+	case rapidjson::kFalseType:
+	case rapidjson::kTrueType:   return Json::ValueType_Bool;
+	case rapidjson::kNumberType: return Json::ValueType_Number;
+	case rapidjson::kStringType: return Json::ValueType_String;
+	default: APT_ASSERT(false); break;
 	};
 
 	return Json::ValueType_Count;
 }
 
 /*******************************************************************************
-
-                                   Json
-
+Json
 *******************************************************************************/
 
 struct Json::Impl
 {
-	static const int kMaxStackDepth = 8;
-
 	rapidjson::Document m_dom;
 
- // current value set after find()
-	rapidjson::Value* m_value;
+	// current value set after find()
+	rapidjson::Value* m_value = nullptr;
 
- // value stack for objects/arrays
-	rapidjson::Value* m_stack[kMaxStackDepth];
-	int m_iter[kMaxStackDepth];
-	int m_stackTop;
+	// value stack for objects/arrays
+	eastl::vector<eastl::pair<rapidjson::Value*, int> > m_stack;
 
-	void push(rapidjson::Value* _val = 0)
+	void push(rapidjson::Value* _val = nullptr)
 	{
-		APT_ASSERT(m_stackTop < kMaxStackDepth);
-		APT_ASSERT(top() != _val); // probably a mistake, called push() twice?
-		m_stack[++m_stackTop] = _val ? _val : m_value;
-		m_iter[m_stackTop] = 0;
+		APT_ASSERT(m_stack.empty() || top() != _val); // probably a mistake, called push() twice?
+		m_stack.push_back(eastl::make_pair(_val ? _val : m_value, 0));
 	}
 	void pop()
 	{
-		--m_stackTop; 
+		APT_ASSERT(!m_stack.empty());
+		m_stack.pop_back();
 	}
-	rapidjson::Value* top() 
+	rapidjson::Value* top()
 	{
-		return m_stack[m_stackTop]; 
+		APT_ASSERT(!m_stack.empty());
+		return m_stack.back().first;
 	}
 	int& topIter()
 	{
-		return m_iter[m_stackTop];
+		APT_ASSERT(!m_stack.empty());
+		return m_stack.back().second;
 	}
-	
 
-	Impl(): m_stackTop(-1) {}
+	// Get the current value, optionally access the element _i if an array.
+	rapidjson::Value* get(int _i = -1)
+	{
+		rapidjson::Value* ret = m_value;
+		APT_ASSERT(ret);
+		if (_i >= 0 && GetValueType(ret->GetType()) == ValueType_Array) {
+			int n = (int)ret->GetArray().Size();
+			APT_ASSERT_MSG(_i < n, "Array index out of bounds (%d/%d)", _i, n);
+			ret = &ret->GetArray()[_i];
+		}
+		return ret;
+	}
 };
 
 
@@ -141,11 +148,13 @@ Json::~Json()
 
 bool Json::find(const char* _name)
 {
-	if (!m_impl->top()->IsObject()) {
+	rapidjson::Value* top = m_impl->top();
+
+	if (!top->IsObject()) {
 		return false;
 	}
-	auto it = m_impl->top()->FindMember(_name);
-	if (it != m_impl->top()->MemberEnd()) {
+	auto it = top->FindMember(_name);
+	if (it != top->MemberEnd()) {
 		m_impl->m_value = &it->value;
 		return true;
 	}
@@ -154,159 +163,167 @@ bool Json::find(const char* _name)
 
 bool Json::next()
 {
-	if (GetValueType(m_impl->top()->GetType()) == ValueType_Array) {
-		auto it = m_impl->top()->Begin() + (m_impl->topIter()++);
+	rapidjson::Value* top = m_impl->top();
+
+	if (GetValueType(top->GetType()) == ValueType_Array) {
+		auto it = top->Begin() + (m_impl->topIter()++);
 		m_impl->m_value = it;
-		return it != m_impl->top()->End();
+		return it != top->End();
 	}
-
-	if (GetValueType(m_impl->top()->GetType()) == ValueType_Object) {
-		auto it = m_impl->top()->MemberBegin() + (m_impl->topIter()++);
+	else if (GetValueType(top->GetType()) == ValueType_Object) {
+		auto it = top->MemberBegin() + (m_impl->topIter()++);
 		m_impl->m_value = &it->value;
-		return it != m_impl->top()->MemberEnd();
+		return it != top->MemberEnd();
 	}
-
 	APT_ASSERT(false); // not an object or an array
 	return false;
 }
 
 Json::ValueType Json::getType() const
 {
-	return GetValueType(m_impl->m_value->GetType()); 
+	return GetValueType(m_impl->m_value->GetType());
 }
 
-template <> bool Json::getValue<bool>() const
+template <> bool Json::getValue<bool>(int _i) const
 {
-	APT_ASSERT_MSG(getType() == ValueType_Bool, "Json::getValue: value was not a boolean");
-	return m_impl->m_value->GetBool();
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Bool, "Json::getValue: not a bool");
+	return jsonValue->GetBool();
 }
-template <> sint64 Json::getValue<sint64>() const
+
+template <> sint64 Json::getValue<sint64>(int _i) const
 {
-	APT_ASSERT_MSG(getType() == ValueType_Number, "Json::getValue: value was not a number");
-	return m_impl->m_value->GetInt64();
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Number, "Json::getValue: not a number");
+	return jsonValue->GetInt64();
 }
-template <> sint32 Json::getValue<sint32>() const
+template <> sint32 Json::getValue<sint32>(int _i) const
 {
-	APT_ASSERT_MSG(getType() == ValueType_Number, "Json::getValue: value was not a number");
-	return m_impl->m_value->GetInt();
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Number, "Json::getValue: not a number");
+	return jsonValue->GetInt();
 }
-template <> sint8 Json::getValue<sint8>() const
+template <> sint16 Json::getValue<sint16>(int _i) const
 {
-	APT_ASSERT_MSG(getType() == ValueType_Number, "Json::getValue: value was not a number");
-	return (sint8)m_impl->m_value->GetInt();
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Number, "Json::getValue: not a number");
+	return jsonValue->GetInt();
 }
-template <> uint64 Json::getValue<uint64>() const
+template <> sint8 Json::getValue<sint8>(int _i) const
 {
-	APT_ASSERT_MSG(getType() == ValueType_Number, "Json::getValue: value was not a number");
-	return m_impl->m_value->GetUint64();
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Number, "Json::getValue: not a number");
+	return jsonValue->GetInt();
 }
-template <> uint32 Json::getValue<uint32>() const
+template <> uint64 Json::getValue<uint64>(int _i) const
 {
-	APT_ASSERT_MSG(getType() == ValueType_Number, "Json::getValue: value was not a number");
-	return m_impl->m_value->GetUint();
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Number, "Json::getValue: not a number");
+	return jsonValue->GetUint64();
 }
-template <> uint8 Json::getValue<uint8>() const
+template <> uint32 Json::getValue<uint32>(int _i) const
 {
-	APT_ASSERT_MSG(getType() == ValueType_Number, "Json::getValue: value was not a number");
-	return (uint8)m_impl->m_value->GetUint();
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Number, "Json::getValue: not a number");
+	return jsonValue->GetUint();
 }
-template <> float32 Json::getValue<float32>() const
+template <> uint16 Json::getValue<uint16>(int _i) const
 {
-	APT_ASSERT_MSG(getType() == ValueType_Number, "Json::getValue: value was not a number");
-	return m_impl->m_value->GetFloat();
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Number, "Json::getValue: not a number");
+	return jsonValue->GetUint();
 }
-template <> float64 Json::getValue<float64>() const
+template <> uint8 Json::getValue<uint8>(int _i) const
 {
-	APT_ASSERT_MSG(getType() == ValueType_Number, "Json::getValue: value was not a number");
-	return m_impl->m_value->GetDouble();
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Number, "Json::getValue: not a number");
+	return jsonValue->GetUint();
 }
-template <> const char* Json::getValue<const char*>() const
+template <> float32 Json::getValue<float32>(int _i) const
 {
-	APT_ASSERT_MSG(getType() == ValueType_String, "Json::getValue: value was not a string");
-	return m_impl->m_value->GetString();
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Number, "Json::getValue: not a number");
+	return jsonValue->GetFloat();
 }
-template <> vec2 Json::getValue<vec2>() const
+template <> float64 Json::getValue<float64>(int _i) const
 {
-	vec2 ret;
-	Json* json = const_cast<Json*>(this);
-	if (json->enterArray()) {
-		APT_ASSERT_MSG(m_impl->top()->Size() == 2, "Json::getValue: invalid vec2, size = %d", m_impl->top()->Size());
-		int i = 0;
-		while (json->next()) {
-			ret[i++] = getValue<float>();
-		}
-		json->leaveArray();
-	}
-	return ret;
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Number, "Json::getValue: not a number");
+	return jsonValue->GetDouble();
 }
-template <> vec3 Json::getValue<vec3>() const
+template <> const char* Json::getValue<const char*>(int _i) const
 {
-	vec3 ret;
-	Json* json = const_cast<Json*>(this);
-	if (json->enterArray()) {
-		APT_ASSERT_MSG(m_impl->top()->Size() == 3, "Json::getValue: invalid vec3, size = %d", m_impl->top()->Size());
-		int i = 0;
-		while (json->next()) {
-			ret[i++] = getValue<float>();
-		}
-		json->leaveArray();
-	}
-	return ret;
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_String, "Json::getValue: not a string");
+	return jsonValue->GetString();
 }
-template <> vec4 Json::getValue<vec4>() const
+template <> vec2 Json::getValue<vec2>(int _i) const
 {
-	vec4 ret;
-	Json* json = const_cast<Json*>(this);
-	if (json->enterArray()) {
-		APT_ASSERT_MSG(m_impl->top()->Size() == 4, "Json::getValue: invalid vec4, size = %d", m_impl->top()->Size());
-		int i = 0;
-		while (json->next()) {
-			ret[i++] = getValue<float>();
-		}
-		json->leaveArray();
-	}
-	return ret;
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Array, "Json::getValue: not an array");
+	APT_ASSERT_MSG(jsonValue->Size() == 2, "Json::getValue: invalid vec2, size = %d", jsonValue->Size());
+	auto& arr = jsonValue->GetArray();
+	return vec2(arr[0].GetFloat(), arr[1].GetFloat());
 }
-template <> mat2 Json::getValue<mat2>() const
+template <> vec3 Json::getValue<vec3>(int _i) const
 {
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Array, "Json::getValue: not an array");
+	APT_ASSERT_MSG(jsonValue->Size() == 3, "Json::getValue: invalid vec3, size = %d", jsonValue->Size());
+	auto& arr = jsonValue->GetArray();
+	return vec3(arr[0].GetFloat(), arr[1].GetFloat(), arr[2].GetFloat());
+}
+template <> vec4 Json::getValue<vec4>(int _i) const
+{
+	const rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Array, "Json::getValue: not an array");
+	APT_ASSERT_MSG(jsonValue->Size() == 4, "Json::getValue: invalid vec4, size = %d", jsonValue->Size());
+	auto& arr = jsonValue->GetArray();
+	return vec4(arr[0].GetFloat(), arr[1].GetFloat(), arr[2].GetFloat(), arr[3].GetFloat());
+}
+template <> mat2 Json::getValue<mat2>(int _i) const
+{
+	rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Array, "Json::getValue: not an array");
+	APT_ASSERT_MSG(jsonValue->Size() == 2, "Json::getValue: invalid mat2, size = %d (should be 2* vec2)", jsonValue->Size());
 	mat2 ret;
-	Json* json = const_cast<Json*>(this);
-	if (json->enterArray()) {
-		APT_ASSERT_MSG(m_impl->top()->Size() == 2, "Json::getValue: invalid mat2, size = %d (should be 2* vec2)", m_impl->top()->Size());
-		int i = 0;
-		while (json->next()) {
-			ret[i++] = getValue<vec2>();
-		}
-		json->leaveArray();
+	m_impl->push();
+	m_impl->m_value = jsonValue;
+	for (int i = 0; i < 2; ++i) {
+		ret[i] = getValue<vec2>(i);
 	}
+	m_impl->m_value = m_impl->top();
+	m_impl->pop();
 	return ret;
 }
-template <> mat3 Json::getValue<mat3>() const
+template <> mat3 Json::getValue<mat3>(int _i) const
 {
+	rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Array, "Json::getValue: not an array");
+	APT_ASSERT_MSG(jsonValue->Size() == 3, "Json::getValue: invalid mat3, size = %d (should be 3* vec3)", jsonValue->Size());
 	mat3 ret;
-	Json* json = const_cast<Json*>(this);
-	if (json->enterArray()) {
-		APT_ASSERT_MSG(m_impl->top()->Size() == 3, "Json::getValue: invalid mat3, size = %d (should be 3* vec3)", m_impl->top()->Size());
-		int i = 0;
-		while (json->next()) {
-			ret[i++] = getValue<vec3>();
-		}
-		json->leaveArray();
+	m_impl->push();
+	m_impl->m_value = jsonValue;
+	for (int i = 0; i < 3; ++i) {
+		ret[i] = getValue<vec3>(i);
 	}
+	m_impl->m_value = m_impl->top();
+	m_impl->pop();
 	return ret;
 }
-template <> mat4 Json::getValue<mat4>() const
+template <> mat4 Json::getValue<mat4>(int _i) const
 {
+	rapidjson::Value* jsonValue = m_impl->get(_i);
+	APT_ASSERT_MSG(GetValueType(jsonValue->GetType()) == ValueType_Array, "Json::getValue: not an array");
+	APT_ASSERT_MSG(jsonValue->Size() == 4, "Json::getValue: invalid mat4, size = %d (should be 4* vec4)", jsonValue->Size());
 	mat4 ret;
-	Json* json = const_cast<Json*>(this);
-	if (json->enterArray()) {
-		APT_ASSERT_MSG(m_impl->top()->Size() == 4, "Json::getValue: invalid mat4, size = %d (should be 4* vec4)", m_impl->top()->Size());
-		int i = 0;
-		while (json->next()) {
-			ret[i++] = getValue<vec4>();
-		}
-		json->leaveArray();
+	m_impl->push();
+	m_impl->m_value = jsonValue;
+	for (int i = 0; i < 4; ++i) {
+		ret[i] = getValue<vec4>(i);
 	}
+	m_impl->m_value = m_impl->top();
+	m_impl->pop();
 	return ret;
 }
 
@@ -355,26 +372,28 @@ int Json::getArrayLength() const
 void Json::beginObject(const char* _name)
 {
 	if (_name && find(_name)) {
-	  // object already existed, check the type
+		// object already existed, check the type
 		APT_ASSERT(GetValueType(m_impl->m_value->GetType()) == ValueType_Object);
 		return;
-	} else {
+	}
+	else {
 		if (GetValueType(m_impl->top()->GetType()) == ValueType_Array) {
 			if (_name) {
 				APT_LOG("Json warning: calling beginObject() in an array, name '%s' will be ignored", _name);
 			}
 			m_impl->top()->PushBack(
-				rapidjson::Value(rapidjson::kObjectType).Move(), 
+				rapidjson::Value(rapidjson::kObjectType).Move(),
 				m_impl->m_dom.GetAllocator()
-				);
+			);
 			m_impl->m_value = m_impl->top()->End() - 1;
 
-		} else {
+		}
+		else {
 			m_impl->top()->AddMember(
 				rapidjson::StringRef(_name),
-				rapidjson::Value(rapidjson::kObjectType).Move(), 
+				rapidjson::Value(rapidjson::kObjectType).Move(),
 				m_impl->m_dom.GetAllocator()
-				);
+			);
 			m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
 		}
 	}
@@ -384,26 +403,27 @@ void Json::beginObject(const char* _name)
 void Json::beginArray(const char* _name)
 {
 	if (_name && find(_name)) {
-	  // object already existed, check the type
+		// object already existed, check the type
 		APT_ASSERT(GetValueType(m_impl->m_value->GetType()) == ValueType_Array);
-		return;
-	} else {
+	}
+	else {
 		if (GetValueType(m_impl->top()->GetType()) == ValueType_Array) {
 			if (_name) {
 				APT_LOG("Json warning: calling beginArray() in an array, name '%s' will be ignored", _name);
 			}
 			m_impl->top()->PushBack(
-				rapidjson::Value(rapidjson::kArrayType).Move(), 
+				rapidjson::Value(rapidjson::kArrayType).Move(),
 				m_impl->m_dom.GetAllocator()
-				);
+			);
 			m_impl->m_value = m_impl->top()->End() - 1;
 
-		} else {
+		}
+		else {
 			m_impl->top()->AddMember(
 				rapidjson::StringRef(_name),
-				rapidjson::Value(rapidjson::kArrayType).Move(), 
+				rapidjson::Value(rapidjson::kArrayType).Move(),
 				m_impl->m_dom.GetAllocator()
-				);
+			);
 			m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
 		}
 	}
@@ -415,139 +435,255 @@ template <> void Json::setValue<bool>(const char* _name, bool _val)
 {
 	if (find(_name)) {
 		m_impl->m_value->SetBool(_val);
-	} else {
+	}
+	else {
 		m_impl->top()->AddMember(
 			rapidjson::StringRef(_name),
-			rapidjson::Value(_val).Move(), 
+			rapidjson::Value(_val).Move(),
 			m_impl->m_dom.GetAllocator()
-			);
+		);
 		m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
 	}
 }
-template <> void Json::setValue<sint64>(const char* _name, sint64 _val)
+template <> void Json::setValue<bool>(int _i, bool _val)
 {
-	if (find(_name)) {
-		m_impl->m_value->SetInt64(_val);
-	} else {
-		m_impl->top()->AddMember(
-			rapidjson::StringRef(_name),
-			rapidjson::Value(_val).Move(), 
-			m_impl->m_dom.GetAllocator()
-			);
-		m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
+	rapidjson::Value* top = m_impl->top();
+	if (_i >= 0 && GetValueType(top->GetType()) == ValueType_Array) {
+		m_impl->m_value->GetArray()[_i].SetBool(_val);
+	}
+	else {
+		m_impl->m_value->SetBool(_val);
 	}
 }
 template <> void Json::setValue<sint32>(const char* _name, sint32 _val)
 {
 	if (find(_name)) {
 		m_impl->m_value->SetInt(_val);
-	} else {
+	}
+	else {
 		m_impl->top()->AddMember(
 			rapidjson::StringRef(_name),
-			rapidjson::Value(_val).Move(), 
+			rapidjson::Value(_val).Move(),
 			m_impl->m_dom.GetAllocator()
-			);
+		);
 		m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
 	}
+}
+template <> void Json::setValue<sint32>(int _i, sint32 _val)
+{
+	rapidjson::Value* top = m_impl->top();
+	if (_i >= 0 && GetValueType(top->GetType()) == ValueType_Array) {
+		m_impl->m_value->GetArray()[_i].SetInt(_val);
+	}
+	else {
+		m_impl->m_value->SetInt(_val);
+	}
+}
+template <> void Json::setValue<sint64>(const char* _name, sint64 _val)
+{
+	if (find(_name)) {
+		m_impl->m_value->SetInt64(_val);
+	}
+	else {
+		m_impl->top()->AddMember(
+			rapidjson::StringRef(_name),
+			rapidjson::Value(_val).Move(),
+			m_impl->m_dom.GetAllocator()
+		);
+		m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
+	}
+}
+template <> void Json::setValue<sint64>(int _i, sint64 _val)
+{
+	rapidjson::Value* top = m_impl->top();
+	if (_i >= 0 && GetValueType(top->GetType()) == ValueType_Array) {
+		m_impl->m_value->GetArray()[_i].SetInt64(_val);
+	}
+	else {
+		m_impl->m_value->SetInt64(_val);
+	}
+}
+template <> void Json::setValue<sint16>(const char* _name, sint16 _val)
+{
+	setValue<sint32>(_name, (sint32)_val);
+}
+template <> void Json::setValue<sint16>(int _i, sint16 _val)
+{
+	setValue<sint32>(_i, (sint32)_val);
 }
 template <> void Json::setValue<sint8>(const char* _name, sint8 _val)
 {
 	setValue<sint32>(_name, (sint32)_val);
 }
+template <> void Json::setValue<sint8>(int _i, sint8 _val)
+{
+	setValue<sint32>(_i, (sint32)_val);
+}
 template <> void Json::setValue<uint64>(const char* _name, uint64 _val)
 {
 	if (find(_name)) {
 		m_impl->m_value->SetUint64(_val);
-	} else {
+	}
+	else {
 		m_impl->top()->AddMember(
 			rapidjson::StringRef(_name),
-			rapidjson::Value(_val).Move(), 
+			rapidjson::Value(_val).Move(),
 			m_impl->m_dom.GetAllocator()
-			);
+		);
 		m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
+	}
+}
+template <> void Json::setValue<uint64>(int _i, uint64 _val)
+{
+	rapidjson::Value* top = m_impl->top();
+	if (_i >= 0 && GetValueType(top->GetType()) == ValueType_Array) {
+		m_impl->m_value->GetArray()[_i].SetUint64(_val);
+	}
+	else {
+		m_impl->m_value->SetUint64(_val);
 	}
 }
 template <> void Json::setValue<uint32>(const char* _name, uint32 _val)
 {
 	if (find(_name)) {
 		m_impl->m_value->SetUint(_val);
-	} else {
+	}
+	else {
 		m_impl->top()->AddMember(
 			rapidjson::StringRef(_name),
-			rapidjson::Value(_val).Move(), 
+			rapidjson::Value(_val).Move(),
 			m_impl->m_dom.GetAllocator()
-			);
+		);
 		m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
 	}
+}
+template <> void Json::setValue<uint32>(int _i, uint32 _val)
+{
+	rapidjson::Value* top = m_impl->top();
+	if (_i >= 0 && GetValueType(top->GetType()) == ValueType_Array) {
+		m_impl->m_value->GetArray()[_i].SetUint(_val);
+	}
+	else {
+		m_impl->m_value->SetUint(_val);
+	}
+}
+template <> void Json::setValue<uint16>(const char* _name, uint16 _val)
+{
+	setValue<uint32>(_name, (uint16)_val);
+}
+template <> void Json::setValue<uint16>(int _i, uint16 _val)
+{
+	setValue<uint32>(_i, (uint16)_val);
 }
 template <> void Json::setValue<uint8>(const char* _name, uint8 _val)
 {
 	setValue<uint32>(_name, (uint32)_val);
 }
+template <> void Json::setValue<uint8>(int _i, uint8 _val)
+{
+	setValue<uint32>(_i, (uint32)_val);
+}
 template <> void Json::setValue<float32>(const char* _name, float32 _val)
 {
 	if (find(_name)) {
 		m_impl->m_value->SetFloat(_val);
-	} else {
+	}
+	else {
 		m_impl->top()->AddMember(
 			rapidjson::StringRef(_name),
-			rapidjson::Value(_val).Move(), 
+			rapidjson::Value(_val).Move(),
 			m_impl->m_dom.GetAllocator()
-			);
+		);
 		m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
+	}
+}
+template <> void Json::setValue<float32>(int _i, float32 _val)
+{
+	rapidjson::Value* top = m_impl->top();
+	if (_i >= 0 && GetValueType(top->GetType()) == ValueType_Array) {
+		m_impl->m_value->GetArray()[_i].SetFloat(_val);
+	}
+	else {
+		m_impl->m_value->SetFloat(_val);
 	}
 }
 template <> void Json::setValue<float64>(const char* _name, float64 _val)
 {
 	if (find(_name)) {
 		m_impl->m_value->SetDouble(_val);
-	} else {
+	}
+	else {
 		m_impl->top()->AddMember(
 			rapidjson::StringRef(_name),
-			rapidjson::Value(_val).Move(), 
+			rapidjson::Value(_val).Move(),
 			m_impl->m_dom.GetAllocator()
-			);
+		);
 		m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
+	}
+}
+template <> void Json::setValue<float64>(int _i, float64 _val)
+{
+	rapidjson::Value* top = m_impl->top();
+	if (_i >= 0 && GetValueType(top->GetType()) == ValueType_Array) {
+		m_impl->m_value->GetArray()[_i].SetDouble(_val);
+	}
+	else {
+		m_impl->m_value->SetDouble(_val);
 	}
 }
 template <> void Json::setValue<const char*>(const char* _name, const char* _val)
 {
 	if (find(_name)) {
 		m_impl->m_value->SetString(_val, m_impl->m_dom.GetAllocator());
-	} else {
+	}
+	else {
 		m_impl->top()->AddMember(
 			rapidjson::StringRef(_name),
-			rapidjson::Value().SetString(_val, m_impl->m_dom.GetAllocator()).Move(), 
+			rapidjson::Value().SetString(_val, m_impl->m_dom.GetAllocator()).Move(),
 			m_impl->m_dom.GetAllocator()
-			);
+		);
 		m_impl->m_value = &(m_impl->top()->MemberEnd() - 1)->value;
+	}
+}
+template <> void Json::setValue<const char*>(int _i, const char* _val)
+{
+	rapidjson::Value* top = m_impl->top();
+	if (_i >= 0 && GetValueType(top->GetType()) == ValueType_Array) {
+		m_impl->m_value->GetArray()[_i].SetString(_val, m_impl->m_dom.GetAllocator());
+	}
+	else {
+		m_impl->m_value->SetString(_val, m_impl->m_dom.GetAllocator());
 	}
 }
 
 template <> void Json::pushValue<bool>(bool _val)
 {
 	m_impl->top()->PushBack(
-		rapidjson::Value(_val).Move(), 
+		rapidjson::Value(_val).Move(),
 		m_impl->m_dom.GetAllocator()
-		);
+	);
 	m_impl->m_value = m_impl->top()->End() - 1;
 }
 
 template <> void Json::pushValue<sint64>(sint64 _val)
 {
 	m_impl->top()->PushBack(
-		rapidjson::Value(_val).Move(), 
+		rapidjson::Value(_val).Move(),
 		m_impl->m_dom.GetAllocator()
-		);
+	);
 	m_impl->m_value = m_impl->top()->End() - 1;
 }
 template <> void Json::pushValue<sint32>(sint32 _val)
 {
 	m_impl->top()->PushBack(
-		rapidjson::Value(_val).Move(), 
+		rapidjson::Value(_val).Move(),
 		m_impl->m_dom.GetAllocator()
-		);
+	);
 	m_impl->m_value = m_impl->top()->End() - 1;
+}
+template <> void Json::pushValue<sint16>(sint16 _val)
+{
+	pushValue<sint32>((sint32)_val);
 }
 template <> void Json::pushValue<sint8>(sint8 _val)
 {
@@ -556,37 +692,41 @@ template <> void Json::pushValue<sint8>(sint8 _val)
 template <> void Json::pushValue<uint64>(uint64 _val)
 {
 	m_impl->top()->PushBack(
-		rapidjson::Value(_val).Move(), 
+		rapidjson::Value(_val).Move(),
 		m_impl->m_dom.GetAllocator()
-		);
+	);
 	m_impl->m_value = m_impl->top()->End() - 1;
 }
 template <> void Json::pushValue<uint32>(uint32 _val)
 {
 	m_impl->top()->PushBack(
-		rapidjson::Value(_val).Move(), 
+		rapidjson::Value(_val).Move(),
 		m_impl->m_dom.GetAllocator()
-		);
+	);
 	m_impl->m_value = m_impl->top()->End() - 1;
+}
+template <> void Json::pushValue<uint16>(uint16 _val)
+{
+	pushValue((uint32)_val);
 }
 template <> void Json::pushValue<uint8>(uint8 _val)
 {
-	pushValue<uint32>((uint32)_val);
+	pushValue((uint32)_val);
 }
 template <> void Json::pushValue<float32>(float32 _val)
 {
 	m_impl->top()->PushBack(
-		rapidjson::Value(_val).Move(), 
+		rapidjson::Value(_val).Move(),
 		m_impl->m_dom.GetAllocator()
-		);
+	);
 	m_impl->m_value = m_impl->top()->End() - 1;
 }
 template <> void Json::pushValue<float64>(float64 _val)
 {
 	m_impl->top()->PushBack(
-		rapidjson::Value(_val).Move(), 
+		rapidjson::Value(_val).Move(),
 		m_impl->m_dom.GetAllocator()
-		);
+	);
 	m_impl->m_value = m_impl->top()->End() - 1;
 }
 template <> void Json::pushValue<const char*>(const char* _val)
@@ -594,7 +734,7 @@ template <> void Json::pushValue<const char*>(const char* _val)
 	m_impl->top()->PushBack(
 		rapidjson::Value().SetString(_val, m_impl->m_dom.GetAllocator()).Move(),
 		m_impl->m_dom.GetAllocator()
-		);
+	);
 	m_impl->m_value = m_impl->top()->End() - 1;
 }
 
@@ -602,105 +742,100 @@ template <> void Json::pushValue<const char*>(const char* _val)
 template <> void Json::setValue<vec2>(const char* _name, vec2 _val)
 {
 	beginArray(_name);
-		pushValue(_val.x);
-		pushValue(_val.y);
+	pushValue(_val.x);
+	pushValue(_val.y);
 	leaveArray();
 }
 template <> void Json::setValue<vec3>(const char* _name, vec3 _val)
 {
 	beginArray(_name);
-		pushValue(_val.x);
-		pushValue(_val.y);		
-		pushValue(_val.z);
+	pushValue(_val.x);
+	pushValue(_val.y);
+	pushValue(_val.z);
 	leaveArray();
 }
 template <> void Json::setValue<vec4>(const char* _name, vec4 _val)
 {
 	beginArray(_name);
-		pushValue(_val.x);
-		pushValue(_val.y);		
-		pushValue(_val.z);				
-		pushValue(_val.w);
+	pushValue(_val.x);
+	pushValue(_val.y);
+	pushValue(_val.z);
+	pushValue(_val.w);
 	leaveArray();
 }
 template <> void Json::pushValue<vec2>(vec2 _val)
 {
 	beginArray();
-		pushValue(_val.x);
-		pushValue(_val.y);
+	pushValue(_val.x);
+	pushValue(_val.y);
 	leaveArray();
 }
 template <> void Json::pushValue<vec3>(vec3 _val)
 {
 	beginArray();
-		pushValue(_val.x);
-		pushValue(_val.y);		
-		pushValue(_val.z);
+	pushValue(_val.x);
+	pushValue(_val.y);
+	pushValue(_val.z);
 	leaveArray();
 }
 template <> void Json::pushValue<vec4>(vec4 _val)
 {
 	beginArray();
-		pushValue(_val.x);
-		pushValue(_val.y);		
-		pushValue(_val.z);				
-		pushValue(_val.w);
+	pushValue(_val.x);
+	pushValue(_val.y);
+	pushValue(_val.z);
+	pushValue(_val.w);
 	leaveArray();
 }
 
 template <> void Json::setValue<mat2>(const char* _name, mat2 _val)
 {
 	beginArray(_name);
-		for (int i = 0; i < 2; ++i) {
-			pushValue<vec2>(_val[i]);
-		}
+	for (int i = 0; i < 2; ++i) {
+		pushValue<vec2>(_val[i]);
+	}
 	leaveArray();
 }
 template <> void Json::setValue<mat3>(const char* _name, mat3 _val)
 {
 	beginArray(_name);
-		for (int i = 0; i < 3; ++i) {
-			pushValue<vec3>(_val[i]);
-		}
+	for (int i = 0; i < 3; ++i) {
+		pushValue<vec3>(_val[i]);
+	}
 	leaveArray();
 }
 template <> void Json::setValue<mat4>(const char* _name, mat4 _val)
 {
 	beginArray(_name);
-		for (int i = 0; i < 4; ++i) {
-			pushValue<vec4>(_val[i]);
-		}
+	for (int i = 0; i < 4; ++i) {
+		pushValue<vec4>(_val[i]);
+	}
 	leaveArray();
 }
 template <> void Json::pushValue<mat2>(mat2 _val)
 {
 	beginArray();
-		for (int i = 0; i < 2; ++i) {
-			for (int j = 0; j < 2; ++j) {
-				pushValue(_val[i][j]);
-			}
-		}
+	for (int i = 0; i < 2; ++i) {
+		pushValue<vec2>(_val[i]);
+	}
 	leaveArray();
 }
 template <> void Json::pushValue<mat3>(mat3 _val)
 {
 	beginArray();
-		for (int i = 0; i < 3; ++i) {
-			for (int j = 0; j < 3; ++j) {
-				pushValue(_val[i][j]);
-			}
-		}
+	for (int i = 0; i < 3; ++i) {
+		pushValue<vec3>(_val[i]);
+	}
 	leaveArray();
 }
 template <> void Json::pushValue<mat4>(mat4 _val)
 {
 	beginArray();
-		for (int i = 0; i < 4; ++i) {
-			pushValue<vec4>(_val[i]);
-		}
+	for (int i = 0; i < 4; ++i) {
+		pushValue<vec4>(_val[i]);
+	}
 	leaveArray();
 }
-
 
 /*******************************************************************************
 
